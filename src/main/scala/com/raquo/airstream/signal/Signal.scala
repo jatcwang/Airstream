@@ -204,7 +204,11 @@ trait Signal[+A] extends Observable[A] {
   }
 }
 
-object Signal {
+object Signal extends SignalZips {
+
+  @inline def seq[A](signals: Seq[Signal[A]]): Signal[Seq[A]] = {
+    new SeqSignal[A](signals)
+  }
 
   @inline def fromFuture[A](future: Future[A]): Signal[Option[A]] = {
     new FutureSignal(future)
