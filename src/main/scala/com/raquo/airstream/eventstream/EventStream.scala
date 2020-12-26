@@ -184,6 +184,8 @@ object EventStream extends EventStreamCombines {
     new SeqEventStream[Nothing](events = Nil, emitOnce = true)
   }
 
+  def seq[A](streams: Seq[EventStream[A]]): EventStream[Seq[A]] = new SeqJoinEventStream[A](streams)
+
   /** @param emitOnce if true, the event will be emitted at most one time.
     *                 If false, the event will be emitted every time the stream is started. */
   @deprecated("Use `fromValue` or `empty` (see docs)", "0.4") // @TODO Are we sure we want to deprecate this?
