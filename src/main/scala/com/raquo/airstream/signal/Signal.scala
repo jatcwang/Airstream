@@ -216,7 +216,7 @@ object Signal extends SignalCombines {
   }
 
   @inline
-  def combine[T1, T2](s1: Signal[T1], s2: Signal[T2]): Signal[(T1, T2)] = s1.withCurrentValueOf(s2)
+  def combine[T1, T2](s1: Signal[T1], s2: Signal[T2]): Signal[(T1, T2)] = s1.combine(s2)
 
   @inline def fromFuture[A](future: Future[A]): Signal[Option[A]] = {
     new FutureSignal(future)
