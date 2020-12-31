@@ -1,14 +1,16 @@
 package com.raquo.airstream.eventstream
 
-import com.raquo.airstream.composition.Composition
+import app.tulz.tuplez.Composition
+import com.raquo.airstream.combine.{CombineEventStreamN, CombineObservable}
+import com.raquo.airstream.combine.generated.{CombineEventStream2, EventStreamCombineMethods}
 import com.raquo.airstream.core.AirstreamError.ObserverError
-import com.raquo.airstream.core.{ AirstreamError, Observable, Transaction }
-import com.raquo.airstream.features.{ CombineObservable, Splittable }
-import com.raquo.airstream.signal.{ FoldLeftSignal, Signal, SignalFromEventStream }
+import com.raquo.airstream.core.{AirstreamError, Observable, Transaction}
+import com.raquo.airstream.features.Splittable
+import com.raquo.airstream.signal.{FoldLeftSignal, Signal, SignalFromEventStream}
 
 import scala.concurrent.Future
 import scala.scalajs.js
-import scala.util.{ Failure, Success, Try }
+import scala.util.{Failure, Success, Try}
 
 trait EventStream[+A] extends Observable[A] {
 
@@ -90,22 +92,24 @@ trait EventStream[+A] extends Observable[A] {
     operator(this)
   }
 
-  def combineWith[B, C](otherEventStream: EventStream[B])(project: (A, B) => C): EventStream[C] = {
+  def combineWith[B, C](otherEventStream: EventStream[B])(combinator: (A, B) => C): EventStream[C] = {
     new CombineEventStream2[A, B, C](
       parent1 = this,
       parent2 = otherEventStream,
-      combinator = CombineObservable.guardedCombinator(project)
+      combinator = combinator
     )
   }
 
-  @inline def combine[B](otherEventStream: EventStream[B])(implicit composition: Composition[A, B]): EventStream[composition.Composed] =
+  @inline def combine[B](otherEventStream: EventStream[B])(implicit composition: Composition[A, B]): EventStream[composition.Composed] = {
     combineWith(otherEventStream)(composition.compose)
+  }
 
+  /** @param project MUST NOT THROW! */
   def withCurrentValueOfWith[B, C](signal: Signal[B])(project: (A, B) => C): EventStream[C] = {
     new SampleCombineEventStream2[A, B, C](
       samplingStream = this,
       sampledSignal = signal,
-      combinator = CombineObservable.guardedCombinator(project)
+      combinator = CombineObservable.tupleCombinator(project)
     )
   }
 
@@ -117,7 +121,7 @@ trait EventStream[+A] extends Observable[A] {
     new SampleCombineEventStream2[A, B, B](
       samplingStream = this,
       sampledSignal = signal,
-      combinator = CombineObservable.guardedCombinator((_, sampledValue) => sampledValue)
+      combinator = CombineObservable.tupleCombinator((_, sampledValue) => sampledValue)
     )
   }
 
@@ -177,14 +181,12 @@ trait EventStream[+A] extends Observable[A] {
   }
 }
 
-object EventStream extends EventStreamCombines {
+object EventStream extends EventStreamCombineMethods {
 
   /** Event stream that never emits anything */
   val empty: EventStream[Nothing] = {
     new SeqEventStream[Nothing](events = Nil, emitOnce = true)
   }
-
-  def seq[A](streams: Seq[EventStream[A]]): EventStream[Seq[A]] = new SeqJoinEventStream[A](streams)
 
   /** @param emitOnce if true, the event will be emitted at most one time.
     *                 If false, the event will be emitted every time the stream is started. */
@@ -209,7 +211,7 @@ object EventStream extends EventStreamCombines {
     new FutureEventStream(future, emitIfFutureCompleted = false)
   }
 
-  @inline def fromJsPromise[A](promise: js.Promise[A]): EventStream[A] = {
+  def fromJsPromise[A](promise: js.Promise[A]): EventStream[A] = {
     fromFuture(promise.toFuture)
   }
 
@@ -226,15 +228,34 @@ object EventStream extends EventStreamCombines {
     )
   }
 
-  @inline def combine[A, B](
-    stream1: EventStream[A],
-    stream2: EventStream[B]
-  ): EventStream[(A, B)] = {
-    stream1.combine(stream2)
+  def combine[T1, T2](
+    stream1: EventStream[T1],
+    stream2: EventStream[T2]
+  ): EventStream[(T1, T2)] = {
+    combineWith(stream1, stream2)(Tuple2.apply[T1, T2])
+  }
+
+  def combineWith[T1, T2, Out](
+    stream1: EventStream[T1],
+    stream2: EventStream[T2]
+  )(
+    combinator: (T1, T2) => Out
+  ): EventStream[Out] = {
+    new CombineEventStream2(stream1, stream2, combinator)
+  }
+
+  def combineSeq[A](
+    streams: Seq[EventStream[A]]
+  ): EventStream[Seq[A]] = {
+    new CombineEventStreamN[A, Seq[A]](streams, identity)
   }
 
   def merge[A](streams: EventStream[A]*): EventStream[A] = {
     new MergeEventStream[A](streams)
+  }
+
+  def mergeSeq[A](streams: Seq[EventStream[A]]): EventStream[A] = {
+    merge(streams: _*) // @TODO[Performance] Does _* introduce any overhead in Scala.js?
   }
 
   implicit def toTuple2Stream[A, B](stream: EventStream[(A, B)]): Tuple2EventStream[A, B] = {

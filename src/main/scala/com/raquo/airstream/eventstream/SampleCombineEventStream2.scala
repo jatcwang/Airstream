@@ -1,7 +1,8 @@
 package com.raquo.airstream.eventstream
 
+import com.raquo.airstream.combine.CombineObservable
 import com.raquo.airstream.core.Transaction
-import com.raquo.airstream.features.{CombineObservable, InternalParentObserver}
+import com.raquo.airstream.features.InternalParentObserver
 import com.raquo.airstream.signal.Signal
 
 import scala.util.Try
@@ -11,7 +12,7 @@ import scala.util.Try
   *
   * Works similar to Rx's "withLatestFrom", except without glitches (see a diamond case test for this in GlitchSpec).
   *
-  * @param combinator Note: Must not throw. Must have no side effects. Can be executed more than once per transaction.
+  * @param combinator Note: Must not throw.
   */
 class SampleCombineEventStream2[A, B, O](
   samplingStream: EventStream[A],
@@ -23,26 +24,25 @@ class SampleCombineEventStream2[A, B, O](
 
   private[this] var maybeSamplingValue: Option[Try[A]] = None
 
+  override protected[this] def inputsReady: Boolean = maybeSamplingValue.nonEmpty
+
+  override protected[this] def combinedValue: Try[O] = {
+    combinator(maybeSamplingValue.get, sampledSignal.tryNow())
+  }
+
   parentObservers.push(
     InternalParentObserver.fromTry[A](samplingStream, (nextSamplingValue, transaction) => {
       maybeSamplingValue = Some(nextSamplingValue)
-      // Update `maybeCombinedValue` and mark the combined observable as pending
-      internalObserver.onTry(combinator(nextSamplingValue, sampledSignal.tryNow()), transaction)
+      onInputsReady(transaction)
     }),
-    InternalParentObserver.fromTry[B](sampledSignal, (nextSampledValue, _) => {
-      // Update combined value, but only if sampling stream already emitted a value.
-      // So we only update the value if we know that this observable will syncFire.
-      maybeSamplingValue.foreach { lastSamplingValue =>
-        // Update `maybeCombinedValue`
-        // - We need this if `sampledSignal` fires after the combined observable has already been marked as pending
-        maybeCombinedValue = Some(combinator(lastSamplingValue, nextSampledValue))
-      }
+    InternalParentObserver.fromTry[B](sampledSignal, (_, _) => {
+      // Do nothing, we just want to ensure that sampledSignal is started.
     })
   )
 
   override private[airstream] def syncFire(transaction: Transaction): Unit = {
-    maybeSamplingValue = None // This is set to none only if syncFire is imminent, so this is enough to clear memory
     super.syncFire(transaction)
+    maybeSamplingValue = None // Clear memory, as we won't need this value again
   }
 
 }

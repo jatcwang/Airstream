@@ -1,6 +1,7 @@
 package com.raquo.airstream.signal
 
-import com.raquo.airstream.features.{CombineObservable, InternalParentObserver}
+import com.raquo.airstream.combine.CombineObservable
+import com.raquo.airstream.features.InternalParentObserver
 
 import scala.util.Try
 
@@ -9,7 +10,7 @@ import scala.util.Try
   *
   * Works similar to Rx's "withLatestFrom", except without glitches (see a diamond case test for this in GlitchSpec).
   *
-  * @param combinator Note: Must not throw. Must have no side effects. Can be executed more than once per transaction.
+  * @param combinator Note: Must not throw.
   */
 class SampleCombineSignal2[A, B, O](
   samplingSignal: Signal[A],
@@ -21,15 +22,18 @@ class SampleCombineSignal2[A, B, O](
 
   override protected[this] def initialValue: Try[O] = combinator(samplingSignal.tryNow(), sampledSignal.tryNow())
 
+  override protected[this] def inputsReady: Boolean = true
+
+  override protected[this] def combinedValue: Try[O] = {
+    combinator(samplingSignal.tryNow(), sampledSignal.tryNow())
+  }
+
   parentObservers.push(
-    InternalParentObserver.fromTry[A](samplingSignal, (nextSamplingValue, transaction) => {
-      // Update `maybeCombinedValue` and mark the combined observable as pending
-      internalObserver.onTry(combinator(nextSamplingValue, sampledSignal.tryNow()), transaction)
+    InternalParentObserver.fromTry[A](samplingSignal, (_, transaction) => {
+      onInputsReady(transaction)
     }),
-    InternalParentObserver.fromTry[B](sampledSignal, (nextSampledValue, _) => {
-      // Update `maybeCombinedValue`
-      // - We need this if `sampledSignal` fires after the combined observable has already been marked as pending
-      maybeCombinedValue = Some(combinator(samplingSignal.tryNow(), nextSampledValue))
+    InternalParentObserver.fromTry[B](sampledSignal, (_, transaction) => {
+      // Do nothing, we just want to ensure that sampledSignal is started.
     })
   )
 
